@@ -614,6 +614,15 @@
     return div;
   }
 
+  // openssl rsa -noout -modulus | openssl sha256 호환
+  function modulusSha256(modulus) {
+    const modHex = modulus.toString(16).toUpperCase();
+    const str = 'Modulus=' + modHex + '\n';
+    const md = forge.md.sha256.create();
+    md.update(str);
+    return md.digest().toHex();
+  }
+
   // ── Private Key parser ────────────────────────────────────
   function parsePrivateKey(raw) {
     let privateKey;
@@ -655,14 +664,7 @@
 
     // RSA components
     if (privateKey.n) {
-      const pubKey = forge.pki.setRsaPublicKey(privateKey.n, privateKey.e);
-      const spkiAsn1 = forge.pki.publicKeyToAsn1(pubKey);
-      const spkiDer = forge.asn1.toDer(spkiAsn1).getBytes();
-
-      // Public key fingerprint
-      const pubSha256 = forge.md.sha256.create();
-      pubSha256.update(spkiDer);
-      const pubFp = pubSha256.digest().toHex().toUpperCase().match(/.{2}/g).join(':');
+      const modHash = modulusSha256(privateKey.n);
 
       grid.appendChild(makeCard('Public Key (derived)', [
         ['Modulus (hex, first 40 chars)', privateKey.n.toString(16).toUpperCase().slice(0, 40) + '...'],
@@ -671,9 +673,9 @@
 
       const fpCard = document.createElement('div');
       fpCard.className = 'cert-card full';
-      fpCard.innerHTML = `<div class="cert-card-title">Public Key Fingerprint</div>
-        <div class="cert-row"><span class="cert-key">SHA-256 of SubjectPublicKeyInfo</span>
-          <div class="fp-box">${pubFp}</div></div>`;
+      fpCard.innerHTML = `<div class="cert-card-title">Key Matching (openssl modulus | sha256)</div>
+        <div class="cert-row"><span class="cert-key">Modulus SHA-256 — 인증서의 값과 비교하여 키 쌍 일치를 확인</span>
+          <div class="fp-box">${modHash}</div></div>`;
       grid.appendChild(fpCard);
     }
 
@@ -835,6 +837,17 @@
       <div class="cert-row"><span class="cert-key">SHA-1</span>
         <div class="fp-box">${sha1fp}</div></div>`;
     grid.appendChild(fpCard);
+
+    // ── Key Matching (RSA only)
+    if (pubKey.n) {
+      const modHash = modulusSha256(pubKey.n);
+      const kmCard = document.createElement('div');
+      kmCard.className = 'cert-card full';
+      kmCard.innerHTML = `<div class="cert-card-title">Key Matching (openssl x509 -modulus | sha256)</div>
+        <div class="cert-row"><span class="cert-key">Modulus SHA-256 — Private Key의 값과 비교하여 키 쌍 일치를 확인</span>
+          <div class="fp-box">${modHash}</div></div>`;
+      grid.appendChild(kmCard);
+    }
 
     document.getElementById('certResult').style.display = 'block';
   }
