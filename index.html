@@ -711,6 +711,24 @@
     }
     grid.appendChild(makeCard('Extensions', extRows));
 
+    // ── IKEv2 CERTREQ (CA only)
+    const isCA = bcExt && bcExt.cA;
+    if (isCA) {
+      const spkiAsn1 = forge.pki.publicKeyToAsn1(cert.publicKey);
+      const spkiDer = forge.asn1.toDer(spkiAsn1).getBytes();
+      const spkiSha1 = forge.md.sha1.create();
+      spkiSha1.update(spkiDer);
+      const certReqHash = spkiSha1.digest().toHex().toUpperCase().match(/.{2}/g).join(':');
+
+      const crCard = document.createElement('div');
+      crCard.className = 'cert-card full';
+      crCard.innerHTML = `<div class="cert-card-title">IKEv2 Certificate Request (RFC 7296)</div>`;
+      crCard.innerHTML += `
+        <div class="cert-row"><span class="cert-key">Certification Authority (SHA-1 of SubjectPublicKeyInfo)</span>
+          <div class="fp-box">${certReqHash}</div></div>`;
+      grid.appendChild(crCard);
+    }
+
     // ── SAN (full width)
     const sanExt = cert.getExtension('subjectAltName');
     if (sanExt && sanExt.altNames && sanExt.altNames.length) {
