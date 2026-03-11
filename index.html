@@ -6,7 +6,9 @@
   <title>Bingo's Dev Tools</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js"
+    integrity="sha384-xE6n3RBMZWgwAhyzoIMfY7HN3oDBa/+HBwFFNyxsdY8kseup7C4Blx1yDzprEESV"
+    crossorigin="anonymous"></script>
   <style>
     :root {
       --bg:       #090c14;
@@ -765,6 +767,8 @@
       ['Organization (O)',  dn_attr(cert.issuer, 'O')],
       ['Org. Unit (OU)',    dn_attr(cert.issuer, 'OU')],
       ['Country (C)',       dn_attr(cert.issuer, 'C')],
+      ['State (ST)',        dn_attr(cert.issuer, 'ST')],
+      ['Locality (L)',      dn_attr(cert.issuer, 'L')],
       ['Full DN',           formatDN(cert.issuer)],
     ].filter(r => r[1] !== '—')));
 
