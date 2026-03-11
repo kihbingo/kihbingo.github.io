@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bingo's Dev Tools</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js"></script>
+  <style>
+    :root {
+      --bg:       #090c14;
+      --surface:  #0e1320;
+      --panel:    #131929;
+      --border:   #1e2d4a;
+      --accent:   #00d9ff;
+      --accent2:  #00ff99;
+      --warn:     #ff6b35;
+      --text:     #c8d8f0;
+      --muted:    #4a6080;
+      --mono:     'JetBrains Mono', monospace;
+      --display:  'Orbitron', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Grid overlay ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,217,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,217,255,.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Glow blobs ── */
+    .blob {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .blob-1 { width:500px; height:500px; top:-150px; right:-100px; background: rgba(0,217,255,.07); }
+    .blob-2 { width:400px; height:400px; bottom:-100px; left:-80px;  background: rgba(0,255,153,.05); }
+
+    /* ── Layout ── */
+    #app { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 0 20px 80px; }
+
+    /* ── Header ── */
+    header {
+      padding: 40px 0 32px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .logo-icon {
+      width: 48px; height: 48px;
+      border: 2px solid var(--accent);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      box-shadow: 0 0 20px rgba(0,217,255,.3);
+      flex-shrink: 0;
+    }
+    .site-title {
+      font-family: var(--display);
+      font-size: 22px;
+      color: var(--accent);
+      letter-spacing: 2px;
+      text-shadow: 0 0 20px rgba(0,217,255,.5);
+    }
+    .site-sub {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      margin-top: 4px;
+    }
+    .status-dot {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: var(--accent2);
+    }
+    .dot {
+      width: 8px; height: 8px;
+      background: var(--accent2);
+      border-radius: 50%;
+      animation: blink 1.8s ease infinite;
+      box-shadow: 0 0 8px var(--accent2);
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+    /* ── Nav tabs ── */
+    nav {
+      display: flex;
+      gap: 4px;
+      padding: 24px 0 0;
+      flex-wrap: wrap;
+    }
+    .tab {
+      padding: 8px 18px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px 6px 0 0;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 12px;
+      cursor: pointer;
+      letter-spacing: .5px;
+      transition: all .2s;
+      position: relative;
+    }
+    .tab:hover { color: var(--accent); border-color: var(--accent); }
+    .tab.active {
+      color: var(--accent);
+      border-color: var(--accent);
+      border-bottom-color: var(--panel);
+      background: var(--panel);
+    }
+    .tab .tag {
+      font-size: 9px;
+      background: var(--accent);
+      color: var(--bg);
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    /* ── Panel ── */
+    .tool-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-top: 1px solid var(--accent);
+      border-radius: 0 6px 6px 6px;
+      padding: 28px;
+      display: none;
+      animation: fadeIn .3s ease;
+    }
+    .tool-panel.active { display: block; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+
+    .tool-title {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tool-title span { color: var(--accent); }
+
+    /* ── Cert Tool ── */
+    .input-label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .input-label::before { content: '//'; color: var(--accent); }
+
+    textarea {
+      width: 100%;
+      height: 140px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 14px;
+      resize: vertical;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+      line-height: 1.6;
+    }
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0,217,255,.08);
+    }
+    textarea::placeholder { color: var(--muted); }
+
+    .format-hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: rgba(0,217,255,.03);
+      border-left: 2px solid var(--border);
+      border-radius: 0 4px 4px 0;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      padding: 10px 24px;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: all .2s;
+      box-shadow: 0 0 20px rgba(0,217,255,.2);
+    }
+    .btn:hover {
+      background: #33e4ff;
+      box-shadow: 0 0 30px rgba(0,217,255,.4);
+      transform: translateY(-1px);
+    }
+    .btn:active { transform: translateY(0); }
+    .btn.secondary {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      box-shadow: none;
+    }
+    .btn.secondary:hover { color: var(--text); border-color: var(--muted); box-shadow: none; }
+
+    /* ── Result ── */
+    #certResult {
+      margin-top: 28px;
+      display: none;
+    }
+    .result-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .result-header h3 {
+      font-size: 11px;
+      color: var(--accent2);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      border: 1px solid var(--accent2);
+      color: var(--accent2);
+    }
+
+    .cert-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media(max-width:640px){ .cert-grid { grid-template-columns: 1fr; } }
+
+    .cert-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .cert-card.full { grid-column: 1 / -1; }
+    .cert-card-title {
+      font-size: 10px;
+      color: var(--accent);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      opacity: .8;
+    }
+
+    .cert-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+    .cert-row:last-child { margin-bottom: 0; }
+    .cert-key {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .5px;
+    }
+    .cert-val {
+      font-size: 12px;
+      color: var(--text);
+      word-break: break-all;
+      line-height: 1.5;
+    }
+    .cert-val.mono { font-family: var(--mono); }
+    .cert-val.good { color: var(--accent2); }
+    .cert-val.warn { color: var(--warn); }
+
+    .san-list {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .san-item {
+      background: rgba(0,217,255,.08);
+      border: 1px solid rgba(0,217,255,.2);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--accent);
+    }
+
+    .key-usage-list {
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .ku-badge {
+      background: rgba(0,255,153,.08);
+      border: 1px solid rgba(0,255,153,.2);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--accent2);
+    }
+
+    .fp-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 11px;
+      word-break: break-all;
+      line-height: 1.8;
+      letter-spacing: .5px;
+    }
+
+    .error-box {
+      background: rgba(255,107,53,.08);
+      border: 1px solid rgba(255,107,53,.3);
+      border-radius: 8px;
+      padding: 16px;
+      color: var(--warn);
+      font-size: 12px;
+      margin-top: 20px;
+      display: none;
+    }
+    .error-box::before { content: '⚠ ERROR: '; font-weight: 700; }
+
+    /* ── Home panel ── */
+    .home-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 8px;
+    }
+    .home-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 20px;
+      cursor: pointer;
+      transition: all .2s;
+      text-align: center;
+    }
+    .home-card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 30px rgba(0,217,255,.1);
+      transform: translateY(-3px);
+    }
+    .home-card.soon {
+      opacity: .4;
+      cursor: default;
+    }
+    .home-card.soon:hover { transform: none; border-color: var(--border); box-shadow: none; }
+    .home-card-icon { font-size: 30px; margin-bottom: 12px; }
+    .home-card-name { font-size: 13px; color: var(--text); margin-bottom: 4px; }
+    .home-card-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+    .soon-tag { font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; display: inline-block; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+
+  <div id="app">
+    <header>
+      <div class="logo-icon">🔐</div>
+      <div>
+        <div class="site-title">BINGO.DEV</div>
+        <div class="site-sub">// Network &amp; Security Toolbox</div>
+      </div>
+      <div class="status-dot">
+        <div class="dot"></div>
+        ONLINE
+      </div>
+    </header>
+
+    <nav id="mainNav">
+      <button class="tab active" data-panel="home">HOME</button>
+      <button class="tab" data-panel="x509">X.509 PARSER <span class="tag">NEW</span></button>
+      <!-- 새 탭은 여기에 추가 -->
+    </nav>
+
+    <!-- HOME -->
+    <div class="tool-panel active" id="panel-home">
+      <div class="tool-title">// <span>Available Tools</span></div>
+      <div class="home-grid">
+        <div class="home-card" onclick="switchTab('x509')">
+          <div class="home-card-icon">📜</div>
+          <div class="home-card-name">X.509 Parser</div>
+          <div class="home-card-desc">DER / PEM 인증서 상세 분석</div>
+        </div>
+        <div class="home-card soon">
+          <div class="home-card-icon">🔑</div>
+          <div class="home-card-name">IKEv2 Key Inspector</div>
+          <div class="home-card-desc">IKE SA / Child SA 키 분석</div>
+          <div class="soon-tag">COMING SOON</div>
+        </div>
+        <div class="home-card soon">
+          <div class="home-card-icon">📦</div>
+          <div class="home-card-name">Packet Decoder</div>
+          <div class="home-card-desc">Raw 패킷 HEX 디코딩</div>
+          <div class="soon-tag">COMING SOON</div>
+        </div>
+        <div class="home-card soon">
+          <div class="home-card-icon">🌐</div>
+          <div class="home-card-name">ASN.1 Viewer</div>
+          <div class="home-card-desc">ASN.1 구조 트리 뷰어</div>
+          <div class="soon-tag">COMING SOON</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- X.509 PARSER -->
+    <div class="tool-panel" id="panel-x509">
+      <div class="tool-title">// <span>X.509 Certificate Parser</span> — DER / PEM 인증서 분석기</div>
+
+      <div class="input-label">인증서 입력 (DER Hex, Base64, 또는 PEM)</div>
+      <textarea id="certInput" placeholder="여기에 인증서를 붙여넣기 하세요.
+
+지원 포맷:
+  • DER (HEX)  — 3082 04a5 3082 ...
+  • Base64 DER — MIIEpTCCAo2gAwIB ...
+  • PEM         — -----BEGIN CERTIFICATE----- ..."></textarea>
+
+      <div class="format-hint">
+        💡 Wireshark 캡처에서 복사한 HEX, openssl 출력 Base64, 또는 .pem 파일 내용 모두 지원합니다.
+      </div>
+
+      <div class="btn-row">
+        <button class="btn" onclick="parseCert()">▶ PARSE</button>
+        <button class="btn secondary" onclick="loadExample()">예제 로드</button>
+        <button class="btn secondary" onclick="clearAll()">CLEAR</button>
+      </div>
+
+      <div class="error-box" id="certError"></div>
+
+      <div id="certResult">
+        <div class="result-header">
+          <h3>Certificate Details</h3>
+          <span class="badge" id="certValidBadge"></span>
+        </div>
+        <div class="cert-grid" id="certGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ── Tab switching ──────────────────────────────────────────
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tool-panel').forEach(p => p.classList.remove('active'));
+    const tab = document.querySelector(`[data-panel="${name}"]`);
+    const panel = document.getElementById(`panel-${name}`);
+    if (tab) tab.classList.add('active');
+    if (panel) panel.classList.add('active');
+  }
+
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => switchTab(tab.dataset.panel));
+  });
+
+  // ── Helpers ────────────────────────────────────────────────
+  function showError(msg) {
+    const el = document.getElementById('certError');
+    el.textContent = msg; // ::before adds "⚠ ERROR: "
+    el.style.display = 'block';
+    el.style.textIndent = '';
+    document.getElementById('certResult').style.display = 'none';
+  }
+
+  function hideError() {
+    document.getElementById('certError').style.display = 'none';
+  }
+
+  function clearAll() {
+    document.getElementById('certInput').value = '';
+    hideError();
+    document.getElementById('certResult').style.display = 'none';
+  }
+
+  function stripSpacesAndColons(hex) {
+    return hex.replace(/[\s:]/g, '');
+  }
+
+  function normalizeInput(raw) {
+    raw = raw.trim();
+    // PEM
+    if (raw.startsWith('-----BEGIN')) {
+      const b64 = raw.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+      return forge.util.decode64(b64);
+    }
+    // HEX (contains only hex chars and spaces/colons)
+    const stripped = stripSpacesAndColons(raw);
+    if (/^[0-9a-fA-F]+$/.test(stripped) && stripped.length % 2 === 0) {
+      let bytes = '';
+      for (let i = 0; i < stripped.length; i += 2) {
+        bytes += String.fromCharCode(parseInt(stripped.slice(i, i+2), 16));
+      }
+      return bytes;
+    }
+    // Base64
+    try {
+      return forge.util.decode64(raw.replace(/\s+/g, ''));
+    } catch(_) {
+      throw new Error('인식할 수 없는 포맷입니다. DER HEX, Base64, PEM 중 하나여야 합니다.');
+    }
+  }
+
+  function formatDN(dn) {
+    return dn.attributes.map(a => `${a.shortName || a.type}=${a.value}`).join(', ');
+  }
+
+  function hexFingerprint(bytes) {
+    const md = forge.md.sha256.create();
+    md.update(bytes);
+    return md.digest().toHex().toUpperCase().match(/.{2}/g).join(':');
+  }
+
+  function sha1Fingerprint(bytes) {
+    const md = forge.md.sha1.create();
+    md.update(bytes);
+    return md.digest().toHex().toUpperCase().match(/.{2}/g).join(':');
+  }
+
+  function makeCard(title, rows, full) {
+    const div = document.createElement('div');
+    div.className = 'cert-card' + (full ? ' full' : '');
+    div.innerHTML = `<div class="cert-card-title">${title}</div>`;
+    rows.forEach(([key, val, cls]) => {
+      const row = document.createElement('div');
+      row.className = 'cert-row';
+      row.innerHTML = `<span class="cert-key">${key}</span><span class="cert-val mono ${cls||''}">${val}</span>`;
+      div.appendChild(row);
+    });
+    return div;
+  }
+
+  // ── Main parser ────────────────────────────────────────────
+  function parseCert() {
+    hideError();
+    const raw = document.getElementById('certInput').value;
+    if (!raw.trim()) { showError('인증서 데이터를 입력하세요.'); return; }
+
+    let cert, derBytes;
+    try {
+      derBytes = normalizeInput(raw);
+      const asn1 = forge.asn1.fromDer(derBytes);
+      cert = forge.pki.certificateFromAsn1(asn1);
+    } catch(e) {
+      showError(e.message || '인증서 파싱 실패');
+      return;
+    }
+
+    const now = new Date();
+    const notBefore = cert.validity.notBefore;
+    const notAfter  = cert.validity.notAfter;
+    const expired   = now > notAfter;
+    const notYet    = now < notBefore;
+    const isValid   = !expired && !notYet;
+
+    // Badge
+    const badge = document.getElementById('certValidBadge');
+    badge.textContent = expired ? 'EXPIRED' : notYet ? 'NOT YET VALID' : 'VALID';
+    badge.style.color = isValid ? 'var(--accent2)' : 'var(--warn)';
+    badge.style.borderColor = isValid ? 'var(--accent2)' : 'var(--warn)';
+
+    const grid = document.getElementById('certGrid');
+    grid.innerHTML = '';
+
+    // ── Subject / Issuer
+    grid.appendChild(makeCard('Subject', [
+      ['Common Name (CN)',    dn_attr(cert.subject, 'CN')],
+      ['Organization (O)',   dn_attr(cert.subject, 'O')],
+      ['Org. Unit (OU)',     dn_attr(cert.subject, 'OU')],
+      ['Country (C)',        dn_attr(cert.subject, 'C')],
+      ['State (ST)',         dn_attr(cert.subject, 'ST')],
+      ['Locality (L)',       dn_attr(cert.subject, 'L')],
+      ['Full DN',            formatDN(cert.subject)],
+    ].filter(r => r[1] !== '—')));
+
+    grid.appendChild(makeCard('Issuer', [
+      ['Common Name (CN)',   dn_attr(cert.issuer, 'CN')],
+      ['Organization (O)',  dn_attr(cert.issuer, 'O')],
+      ['Org. Unit (OU)',    dn_attr(cert.issuer, 'OU')],
+      ['Country (C)',       dn_attr(cert.issuer, 'C')],
+      ['Full DN',           formatDN(cert.issuer)],
+    ].filter(r => r[1] !== '—')));
+
+    // ── Validity
+    grid.appendChild(makeCard('Validity', [
+      ['Not Before', notBefore.toISOString().replace('T',' ').slice(0,19) + ' UTC', notYet ? 'warn' : ''],
+      ['Not After',  notAfter .toISOString().replace('T',' ').slice(0,19) + ' UTC', expired ? 'warn' : 'good'],
+      ['Status',     isValid ? '✔ Valid' : expired ? '✘ Expired' : '✘ Not Yet Valid', isValid ? 'good' : 'warn'],
+      ['Days Remaining', expired ? '0' : notYet ? 'N/A' : Math.floor((notAfter - now) / 86400000) + ' days', isValid ? 'good' : 'warn'],
+    ]));
+
+    // ── Key Info
+    const pubKey = cert.publicKey;
+    let keyType = 'Unknown', keySize = '—';
+    if (pubKey.n) { keyType = 'RSA'; keySize = pubKey.n.bitLength() + ' bits'; }
+    else if (pubKey.curve) { keyType = 'EC'; keySize = pubKey.curve; }
+    else if (pubKey.edAlgorithm) { keyType = pubKey.edAlgorithm; keySize = '—'; }
+
+    grid.appendChild(makeCard('Public Key', [
+      ['Algorithm', keyType],
+      ['Key Size / Curve', keySize],
+      ['Signature Algorithm', cert.siginfo.algorithmOid ? oidName(cert.siginfo.algorithmOid) : '—'],
+      ['Serial Number', cert.serialNumber.toUpperCase()],
+      ['Version', 'v' + (cert.version + 1)],
+    ]));
+
+    // ── Extensions summary
+    const extRows = [];
+    const extNames = (cert.extensions || []).map(e => e.name || e.id);
+    extRows.push(['Extensions', extNames.join(', ') || 'None']);
+
+    const bcExt = cert.getExtension('basicConstraints');
+    if (bcExt) extRows.push(['Is CA', bcExt.cA ? '✔ Yes' : '✘ No', bcExt.cA ? 'good' : '']);
+    if (bcExt && bcExt.pathLenConstraint !== undefined)
+      extRows.push(['Path Length', String(bcExt.pathLenConstraint)]);
+
+    const kuExt = cert.getExtension('keyUsage');
+    if (kuExt) {
+      const usages = [];
+      if (kuExt.digitalSignature)  usages.push('Digital Signature');
+      if (kuExt.nonRepudiation)    usages.push('Non Repudiation');
+      if (kuExt.keyEncipherment)   usages.push('Key Encipherment');
+      if (kuExt.dataEncipherment)  usages.push('Data Encipherment');
+      if (kuExt.keyAgreement)      usages.push('Key Agreement');
+      if (kuExt.keyCertSign)       usages.push('Cert Sign');
+      if (kuExt.cRLSign)           usages.push('CRL Sign');
+      extRows.push(['Key Usage', usages.join(' · ') || '—']);
+    }
+    grid.appendChild(makeCard('Extensions', extRows));
+
+    // ── SAN (full width)
+    const sanExt = cert.getExtension('subjectAltName');
+    if (sanExt && sanExt.altNames && sanExt.altNames.length) {
+      const card = document.createElement('div');
+      card.className = 'cert-card full';
+      card.innerHTML = `<div class="cert-card-title">Subject Alternative Names (${sanExt.altNames.length})</div>`;
+      const ul = document.createElement('ul');
+      ul.className = 'san-list';
+      sanExt.altNames.forEach(n => {
+        const li = document.createElement('li');
+        li.className = 'san-item';
+        const typeName = ['Other','Email','DNS','X400','Dir','EDI','URI','IP','RID'][n.type] || n.type;
+        li.textContent = typeName + ': ' + (n.value || n.ip || '');
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+      grid.appendChild(card);
+    }
+
+    // ── Fingerprints (full width)
+    const fpCard = document.createElement('div');
+    fpCard.className = 'cert-card full';
+    fpCard.innerHTML = `<div class="cert-card-title">Fingerprints</div>`;
+    const sha256fp = hexFingerprint(derBytes);
+    const sha1fp   = sha1Fingerprint(derBytes);
+    fpCard.innerHTML += `
+      <div class="cert-row"><span class="cert-key">SHA-256</span>
+        <div class="fp-box">${sha256fp}</div></div>
+      <div class="cert-row"><span class="cert-key">SHA-1</span>
+        <div class="fp-box">${sha1fp}</div></div>`;
+    grid.appendChild(fpCard);
+
+    document.getElementById('certResult').style.display = 'block';
+  }
+
+  function dn_attr(dn, short) {
+    const a = dn.getField(short);
+    return a ? a : '—';
+  }
+
+  const OID_MAP = {
+    '1.2.840.113549.1.1.5':  'SHA1withRSA',
+    '1.2.840.113549.1.1.11': 'SHA256withRSA',
+    '1.2.840.113549.1.1.12': 'SHA384withRSA',
+    '1.2.840.113549.1.1.13': 'SHA512withRSA',
+    '1.2.840.10045.4.3.2':   'SHA256withECDSA',
+    '1.2.840.10045.4.3.3':   'SHA384withECDSA',
+    '1.2.840.10045.4.3.4':   'SHA512withECDSA',
+    '1.3.101.112':            'Ed25519',
+  };
+  function oidName(oid) { return OID_MAP[oid] || oid; }
+
+  // ── Example cert (Let's Encrypt self-signed-like) ──────────
+  function loadExample() {
+    // Real DigiCert Global Root CA (short, well-known)
+    document.getElementById('certInput').value =
+`-----BEGIN CERTIFICATE-----
+MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh
+MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
+d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBD
+QTAeFw0wNjExMTAwMDAwMDBaFw0zMTExMTAwMDAwMDBaMGExCzAJBgNVBAYTAlVT
+MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j
+b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IENBMIIBIANBDR2oSwOD
+gPAAA4IBAQC1qpLHR/iTPQok7G6GHN5P39KPXI2gBBqicGOiOLRgLkWRoJjllfIM
+ABGLpKMNGGPa1Rn/FJSwH9pYi3y2ahZHQCdxq6I7jA3KpGkdW8r3Wm4gAgPCcmVE
+PAnBFWkV0UhTi2b2ql3CZQFQ0DBHIG9kIuqaI7OmtDHVVNMOIPOvPGcj09Rk0Kp0
+tS3ZZ8EVQE+7Xb7r2VMVGmLHX8SVPKB5bUiXe7M9YVgfR0k3OJXa8XzUq2LjqBl
+v2sWEkIrfH/GpfHAmR6M7igBp3mfS1EQLS4cT0P0jYVQaOj3cB/vX4SzHZJjNRjP
+oBhLOkLM5SQPKkKbNrVbwdep
+-----END CERTIFICATE-----`;
+  }
+  </script>
+</body>
+</html>
