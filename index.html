@@ -471,6 +471,14 @@
         💡 Wireshark 캡처에서 복사한 HEX, openssl 출력 Base64, .pem 파일, Private Key (PKCS#8 / PKCS#1) 모두 지원합니다.
       </div>
 
+      <div id="keyPassRow" style="display:none; margin-top:12px;">
+        <div class="input-label">Private Key 비밀번호</div>
+        <input type="password" id="keyPassInput" placeholder="암호화된 키의 비밀번호 입력"
+          style="width:300px; background:var(--surface); border:1px solid var(--border); border-radius:6px;
+          color:var(--text); font-family:var(--mono); font-size:13px; padding:10px 14px; outline:none;"
+          onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+      </div>
+
       <div class="btn-row">
         <button class="btn" onclick="parseCert()">▶ PARSE</button>
         <button class="btn secondary" onclick="loadExample()">예제 로드</button>
@@ -624,16 +632,35 @@
   }
 
   // ── Private Key parser ────────────────────────────────────
+  function detectEncryptedKey(raw) {
+    return raw.includes('BEGIN ENCRYPTED PRIVATE KEY') ||
+      (raw.includes('BEGIN RSA PRIVATE KEY') && raw.includes('DEK-Info'));
+  }
+
+  // Auto-show password field when encrypted key is detected
+  document.getElementById('certInput').addEventListener('input', function() {
+    const val = this.value.trim();
+    document.getElementById('keyPassRow').style.display = detectEncryptedKey(val) ? 'block' : 'none';
+  });
+
   function parsePrivateKey(raw) {
     let privateKey;
+    const isEncrypted = detectEncryptedKey(raw);
     try {
-      if (raw.includes('BEGIN RSA PRIVATE KEY')) {
+      if (isEncrypted) {
+        const password = document.getElementById('keyPassInput').value;
+        if (!password) {
+          showError('암호화된 키입니다. 비밀번호를 입력한 후 다시 PARSE 하세요.');
+          document.getElementById('keyPassRow').style.display = 'block';
+          return;
+        }
+        privateKey = forge.pki.decryptRsaPrivateKey(raw, password);
+        if (!privateKey) {
+          showError('비밀번호가 올바르지 않거나 키 복호화에 실패했습니다.');
+          return;
+        }
+      } else if (raw.includes('BEGIN RSA PRIVATE KEY') || raw.includes('BEGIN PRIVATE KEY')) {
         privateKey = forge.pki.privateKeyFromPem(raw);
-      } else if (raw.includes('BEGIN PRIVATE KEY')) {
-        privateKey = forge.pki.privateKeyFromPem(raw);
-      } else if (raw.includes('BEGIN ENCRYPTED PRIVATE KEY')) {
-        showError('암호화된 키는 지원하지 않습니다. 복호화 후 입력하세요.');
-        return;
       } else {
         return false; // not a private key
       }
