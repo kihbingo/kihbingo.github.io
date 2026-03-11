@@ -458,16 +458,17 @@
     <div class="tool-panel" id="panel-x509">
       <div class="tool-title">// <span>X.509 Certificate Parser</span> — DER / PEM 인증서 분석기</div>
 
-      <div class="input-label">인증서 입력 (DER Hex, Base64, 또는 PEM)</div>
-      <textarea id="certInput" placeholder="여기에 인증서를 붙여넣기 하세요.
+      <div class="input-label">인증서 또는 Private Key 입력</div>
+      <textarea id="certInput" placeholder="여기에 인증서 또는 키를 붙여넣기 하세요.
 
 지원 포맷:
   • DER (HEX)  — 3082 04a5 3082 ...
   • Base64 DER — MIIEpTCCAo2gAwIB ...
-  • PEM         — -----BEGIN CERTIFICATE----- ..."></textarea>
+  • PEM         — -----BEGIN CERTIFICATE----- ...
+  • Private Key — -----BEGIN PRIVATE KEY----- ..."></textarea>
 
       <div class="format-hint">
-        💡 Wireshark 캡처에서 복사한 HEX, openssl 출력 Base64, 또는 .pem 파일 내용 모두 지원합니다.
+        💡 Wireshark 캡처에서 복사한 HEX, openssl 출력 Base64, .pem 파일, Private Key (PKCS#8 / PKCS#1) 모두 지원합니다.
       </div>
 
       <div class="btn-row">
@@ -613,11 +614,85 @@
     return div;
   }
 
+  // ── Private Key parser ────────────────────────────────────
+  function parsePrivateKey(raw) {
+    let privateKey;
+    try {
+      if (raw.includes('BEGIN RSA PRIVATE KEY')) {
+        privateKey = forge.pki.privateKeyFromPem(raw);
+      } else if (raw.includes('BEGIN PRIVATE KEY')) {
+        privateKey = forge.pki.privateKeyFromPem(raw);
+      } else if (raw.includes('BEGIN ENCRYPTED PRIVATE KEY')) {
+        showError('암호화된 키는 지원하지 않습니다. 복호화 후 입력하세요.');
+        return;
+      } else {
+        return false; // not a private key
+      }
+    } catch(e) {
+      showError(e.message || 'Private Key 파싱 실패');
+      return;
+    }
+
+    const badge = document.getElementById('certValidBadge');
+    badge.textContent = 'PRIVATE KEY';
+    badge.style.color = 'var(--warn)';
+    badge.style.borderColor = 'var(--warn)';
+
+    const grid = document.getElementById('certGrid');
+    grid.innerHTML = '';
+
+    // Key info
+    let keyType = 'Unknown', keySize = '—';
+    if (privateKey.n) {
+      keyType = 'RSA';
+      keySize = privateKey.n.bitLength() + ' bits';
+    }
+
+    grid.appendChild(makeCard('Key Info', [
+      ['Type', keyType],
+      ['Key Size', keySize],
+    ]));
+
+    // RSA components
+    if (privateKey.n) {
+      const pubKey = forge.pki.setRsaPublicKey(privateKey.n, privateKey.e);
+      const spkiAsn1 = forge.pki.publicKeyToAsn1(pubKey);
+      const spkiDer = forge.asn1.toDer(spkiAsn1).getBytes();
+
+      // Public key fingerprint
+      const pubSha256 = forge.md.sha256.create();
+      pubSha256.update(spkiDer);
+      const pubFp = pubSha256.digest().toHex().toUpperCase().match(/.{2}/g).join(':');
+
+      grid.appendChild(makeCard('Public Key (derived)', [
+        ['Modulus (hex, first 40 chars)', privateKey.n.toString(16).toUpperCase().slice(0, 40) + '...'],
+        ['Public Exponent', privateKey.e.toString(10)],
+      ]));
+
+      const fpCard = document.createElement('div');
+      fpCard.className = 'cert-card full';
+      fpCard.innerHTML = `<div class="cert-card-title">Public Key Fingerprint</div>
+        <div class="cert-row"><span class="cert-key">SHA-256 of SubjectPublicKeyInfo</span>
+          <div class="fp-box">${pubFp}</div></div>`;
+      grid.appendChild(fpCard);
+    }
+
+    document.getElementById('certResult').style.display = 'block';
+    return true;
+  }
+
   // ── Main parser ────────────────────────────────────────────
   function parseCert() {
     hideError();
     const raw = document.getElementById('certInput').value;
     if (!raw.trim()) { showError('인증서 데이터를 입력하세요.'); return; }
+
+    // Check if it's a private key
+    const trimmed = raw.trim();
+    if (trimmed.includes('PRIVATE KEY')) {
+      const result = parsePrivateKey(trimmed);
+      if (result !== false) return;
+    }
 
     let cert, derBytes;
     try {
