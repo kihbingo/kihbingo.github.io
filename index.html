@@ -708,7 +708,7 @@
 
   function dn_attr(dn, short) {
     const a = dn.getField(short);
-    return a ? a : '—';
+    return a ? a.value : '—';
   }
 
   const OID_MAP = {
