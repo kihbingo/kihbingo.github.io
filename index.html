@@ -723,24 +723,12 @@
   };
   function oidName(oid) { return OID_MAP[oid] || oid; }
 
-  // ── Example cert (Let's Encrypt self-signed-like) ──────────
+  // ── Example cert ─────────────────────────────────────────
   function loadExample() {
-    // Real DigiCert Global Root CA (short, well-known)
-    document.getElementById('certInput').value =
-`-----BEGIN CERTIFICATE-----
-MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh
-MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
-d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBD
-QTAeFw0wNjExMTAwMDAwMDBaFw0zMTExMTAwMDAwMDBaMGExCzAJBgNVBAYTAlVT
-MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j
-b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IENBMIIBIANBDR2oSwOD
-gPAAA4IBAQC1qpLHR/iTPQok7G6GHN5P39KPXI2gBBqicGOiOLRgLkWRoJjllfIM
-ABGLpKMNGGPa1Rn/FJSwH9pYi3y2ahZHQCdxq6I7jA3KpGkdW8r3Wm4gAgPCcmVE
-PAnBFWkV0UhTi2b2ql3CZQFQ0DBHIG9kIuqaI7OmtDHVVNMOIPOvPGcj09Rk0Kp0
-tS3ZZ8EVQE+7Xb7r2VMVGmLHX8SVPKB5bUiXe7M9YVgfR0k3OJXa8XzUq2LjqBl
-v2sWEkIrfH/GpfHAmR6M7igBp3mfS1EQLS4cT0P0jYVQaOj3cB/vX4SzHZJjNRjP
-oBhLOkLM5SQPKkKbNrVbwdep
------END CERTIFICATE-----`;
+    fetch('sample_cert.pem')
+      .then(r => { if (!r.ok) throw new Error('Failed to load sample'); return r.text(); })
+      .then(pem => { document.getElementById('certInput').value = pem.trim(); })
+      .catch(() => showError('예제 파일(sample_cert.pem)을 불러올 수 없습니다.'));
   }
   </script>
 </body>
