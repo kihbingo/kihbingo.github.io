@@ -713,6 +713,291 @@
     });
   })();
 
+  // ── EC/non-RSA certificate fallback parser (ASN.1 direct) ──
+  // Known EC curve OIDs
+  const EC_CURVE_OIDS = {
+    '1.2.840.10045.3.1.7': 'P-256 (prime256v1)',
+    '1.3.132.0.34':        'P-384 (secp384r1)',
+    '1.3.132.0.35':        'P-521 (secp521r1)',
+    '1.2.840.10045.3.1.1': 'P-192 (prime192v1)',
+    '1.3.132.0.10':        'secp256k1',
+  };
+  const PUBKEY_ALG_OIDS = {
+    '1.2.840.10045.2.1':   'EC',
+    '1.2.840.113549.1.1.1':'RSA',
+    '1.3.101.112':          'Ed25519',
+    '1.3.101.113':          'Ed448',
+  };
+
+  function extractOidFromNode(node) {
+    try {
+      return forge.asn1.derToOid(
+        forge.util.createBuffer(forge.util.binary.raw.decode(node.value))
+      );
+    } catch(_) { return null; }
+  }
+
+  function parseCertFromAsn1(asn1, derBytes) {
+    const tbs = asn1.value[0];
+    if (!tbs || tbs.type !== forge.asn1.Type.SEQUENCE) {
+      throw new Error('Not a valid certificate structure');
+    }
+    const fields = tbs.value;
+    let idx = 0;
+
+    // Certificate v3 must have [0] EXPLICIT version tag
+    // CRL starts with INTEGER (version) or SEQUENCE (sigAlg) - reject those
+    if (fields[0].tagClass !== 128 || fields[0].type !== 0) {
+      throw new Error('Not a certificate (no version tag)');
+    }
+
+    // version [0] EXPLICIT
+    let version = 1;
+    if (fields[idx].tagClass === 128 && fields[idx].type === 0) {
+      const vNode = fields[idx].value[0];
+      version = vNode.value.charCodeAt(0) + 1;
+      idx++;
+    }
+
+    // serialNumber
+    const serialHex = forge.util.bytesToHex(fields[idx].value).toUpperCase();
+    idx++;
+
+    // signatureAlgorithm
+    let sigAlg = '—';
+    try {
+      const sigOid = extractOidFromNode(fields[idx].value[0]);
+      sigAlg = OID_MAP[sigOid] || forge.pki.oids[sigOid] || sigOid || '—';
+    } catch(_) {}
+    idx++;
+
+    // issuer
+    let issuerAttrs = [];
+    try { issuerAttrs = forge.pki.RDNAttributesAsArray(fields[idx]); } catch(_) {}
+    idx++;
+
+    // validity
+    const validitySeq = fields[idx];
+    idx++;
+    let notBefore, notAfter;
+    try {
+      notBefore = asn1DateToDate(validitySeq.value[0]);
+      notAfter = asn1DateToDate(validitySeq.value[1]);
+    } catch(_) {
+      notBefore = new Date(0);
+      notAfter = new Date(0);
+    }
+
+    // subject
+    let subjectAttrs = [];
+    try { subjectAttrs = forge.pki.RDNAttributesAsArray(fields[idx]); } catch(_) {}
+    idx++;
+
+    // subjectPublicKeyInfo
+    const spkiSeq = fields[idx];
+    idx++;
+    let keyAlg = 'Unknown', keySize = '—';
+    try {
+      const algSeq = spkiSeq.value[0]; // AlgorithmIdentifier
+      const algOid = extractOidFromNode(algSeq.value[0]);
+      keyAlg = PUBKEY_ALG_OIDS[algOid] || forge.pki.oids[algOid] || algOid || 'Unknown';
+      // For EC, extract curve from parameter
+      if (keyAlg === 'EC' && algSeq.value.length > 1) {
+        const curveOid = extractOidFromNode(algSeq.value[1]);
+        keySize = EC_CURVE_OIDS[curveOid] || curveOid || '—';
+      }
+      // For RSA, try to get key size from the public key bitstring
+      if (keyAlg === 'RSA') {
+        try {
+          const pubKeyBits = spkiSeq.value[1]; // BIT STRING
+          const pubKeyDer = forge.asn1.fromDer(pubKeyBits.value.substring(1)); // skip leading 0x00
+          const modulus = pubKeyDer.value[0];
+          keySize = (modulus.value.length * 8) + ' bits';
+        } catch(_) {}
+      }
+    } catch(_) {}
+
+    // extensions [3]
+    let extensions = [];
+    let sanNames = [];
+    let isCA = false;
+    let keyUsages = [];
+    if (idx < fields.length && fields[idx].tagClass === 128 && fields[idx].type === 3) {
+      try {
+        const extsSeq = fields[idx].value[0]; // SEQUENCE of extensions
+        extsSeq.value.forEach(extSeq => {
+          try {
+            const extOid = extractOidFromNode(extSeq.value[0]);
+            const extName = forge.pki.oids[extOid] || extOid;
+            extensions.push(extName);
+
+            // Parse SAN (OID 2.5.29.17)
+            if (extOid === '2.5.29.17') {
+              const extValueOctet = extSeq.value[extSeq.value.length - 1];
+              const sanAsn1 = forge.asn1.fromDer(extValueOctet.value);
+              sanAsn1.value.forEach(name => {
+                const typeNum = name.type;
+                const typeName = ['Other','Email','DNS','X400','Dir','EDI','URI','IP','RID'][typeNum] || typeNum;
+                sanNames.push(typeName + ': ' + name.value);
+              });
+            }
+            // Parse Basic Constraints (OID 2.5.29.19)
+            if (extOid === '2.5.29.19') {
+              const bcOctet = extSeq.value[extSeq.value.length - 1];
+              const bcAsn1 = forge.asn1.fromDer(bcOctet.value);
+              if (bcAsn1.value.length > 0 && bcAsn1.value[0].type === forge.asn1.Type.BOOLEAN) {
+                isCA = bcAsn1.value[0].value.charCodeAt(0) !== 0;
+              }
+            }
+            // Parse Key Usage (OID 2.5.29.15)
+            if (extOid === '2.5.29.15') {
+              const kuOctet = extSeq.value[extSeq.value.length - 1];
+              const kuAsn1 = forge.asn1.fromDer(kuOctet.value);
+              const bits = kuAsn1.value.charCodeAt(1) || 0;
+              const bits2 = kuAsn1.value.length > 2 ? kuAsn1.value.charCodeAt(2) : 0;
+              const names = ['Digital Signature','Non Repudiation','Key Encipherment','Data Encipherment',
+                'Key Agreement','Cert Sign','CRL Sign','Encipher Only','Decipher Only'];
+              for (let b = 0; b < 8; b++) {
+                if (bits & (1 << (7-b))) keyUsages.push(names[b]);
+              }
+              if (bits2 & 0x80) keyUsages.push(names[8]);
+            }
+          } catch(_) {}
+        });
+      } catch(_) {}
+    }
+
+    // ── Render using same structure as RSA cert ──
+    const now = new Date();
+    const expired = now > notAfter;
+    const notYet = now < notBefore;
+    const isValid = !expired && !notYet;
+
+    const certResult = document.getElementById('certResult');
+    if (!document.getElementById('certValidBadge')) {
+      certResult.innerHTML = `<div class="result-header"><h3>Certificate Details</h3>
+        <span class="badge" id="certValidBadge"></span></div>
+        <div class="cert-grid" id="certGrid"></div>`;
+    }
+
+    const badge = document.getElementById('certValidBadge');
+    badge.textContent = expired ? 'EXPIRED' : notYet ? 'NOT YET VALID' : 'VALID';
+    badge.style.color = isValid ? 'var(--accent2)' : 'var(--warn)';
+    badge.style.borderColor = isValid ? 'var(--accent2)' : 'var(--warn)';
+
+    const grid = document.getElementById('certGrid');
+    grid.innerHTML = '';
+
+    function attrVal(attrs, short) {
+      const a = attrs.find(x => x.shortName === short);
+      return a ? a.value : '—';
+    }
+    function dnStr(attrs) {
+      return attrs.map(a => a.shortName + '=' + a.value).join(', ');
+    }
+
+    grid.appendChild(makeCard('Subject', [
+      ['Common Name (CN)', attrVal(subjectAttrs, 'CN')],
+      ['Organization (O)', attrVal(subjectAttrs, 'O')],
+      ['Org. Unit (OU)', attrVal(subjectAttrs, 'OU')],
+      ['Country (C)', attrVal(subjectAttrs, 'C')],
+      ['State (ST)', attrVal(subjectAttrs, 'ST')],
+      ['Locality (L)', attrVal(subjectAttrs, 'L')],
+      ['Full DN', dnStr(subjectAttrs)],
+    ].filter(r => r[1] !== '—')));
+
+    grid.appendChild(makeCard('Issuer', [
+      ['Common Name (CN)', attrVal(issuerAttrs, 'CN')],
+      ['Organization (O)', attrVal(issuerAttrs, 'O')],
+      ['Org. Unit (OU)', attrVal(issuerAttrs, 'OU')],
+      ['Country (C)', attrVal(issuerAttrs, 'C')],
+      ['State (ST)', attrVal(issuerAttrs, 'ST')],
+      ['Locality (L)', attrVal(issuerAttrs, 'L')],
+      ['Full DN', dnStr(issuerAttrs)],
+    ].filter(r => r[1] !== '—')));
+
+    grid.appendChild(makeCard('Validity', [
+      ['Not Before', notBefore.toISOString().replace('T',' ').slice(0,19) + ' UTC', notYet ? 'warn' : ''],
+      ['Not After',  notAfter .toISOString().replace('T',' ').slice(0,19) + ' UTC', expired ? 'warn' : 'good'],
+      ['Status',     isValid ? '✔ Valid' : expired ? '✘ Expired' : '✘ Not Yet Valid', isValid ? 'good' : 'warn'],
+      ['Days Remaining', expired ? '0' : notYet ? 'N/A' : Math.floor((notAfter - now) / 86400000) + ' days', isValid ? 'good' : 'warn'],
+    ]));
+
+    grid.appendChild(makeCard('Public Key', [
+      ['Algorithm', keyAlg],
+      ['Key Size / Curve', keySize],
+      ['Signature Algorithm', sigAlg],
+      ['Serial Number', serialHex],
+      ['Version', 'v' + version],
+    ]));
+
+    // Extensions
+    const extRows = [];
+    extRows.push(['Extensions', extensions.join(', ') || 'None']);
+    extRows.push(['Is CA', isCA ? '✔ Yes' : '✘ No', isCA ? 'good' : '']);
+    if (keyUsages.length) extRows.push(['Key Usage', keyUsages.join(' · ')]);
+    grid.appendChild(makeCard('Extensions', extRows));
+
+    // IKEv2 CERTREQ (CA only)
+    if (isCA) {
+      try {
+        const spkiDer = forge.asn1.toDer(spkiSeq).getBytes();
+        const spkiSha1 = forge.md.sha1.create();
+        spkiSha1.update(spkiDer);
+        const certReqHash = spkiSha1.digest().toHex().toUpperCase().match(/.{2}/g).join(':');
+        const crCard = document.createElement('div');
+        crCard.className = 'cert-card full';
+        crCard.innerHTML = `<div class="cert-card-title">IKEv2 Certificate Request (RFC 7296)</div>
+          <div class="cert-row"><span class="cert-key">Certification Authority (SHA-1 of SubjectPublicKeyInfo)</span>
+            <div class="fp-box">${certReqHash}</div></div>`;
+        grid.appendChild(crCard);
+      } catch(_) {}
+    }
+
+    // SAN
+    if (sanNames.length) {
+      const card = document.createElement('div');
+      card.className = 'cert-card full';
+      card.innerHTML = `<div class="cert-card-title">Subject Alternative Names (${sanNames.length})</div>`;
+      const ul = document.createElement('ul');
+      ul.className = 'san-list';
+      sanNames.forEach(s => {
+        const li = document.createElement('li');
+        li.className = 'san-item';
+        li.textContent = s;
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+      grid.appendChild(card);
+    }
+
+    // Fingerprints
+    const fpCard = document.createElement('div');
+    fpCard.className = 'cert-card full';
+    fpCard.innerHTML = `<div class="cert-card-title">Fingerprints</div>
+      <div class="cert-row"><span class="cert-key">SHA-256</span>
+        <div class="fp-box">${hexFingerprint(derBytes)}</div></div>
+      <div class="cert-row"><span class="cert-key">SHA-1</span>
+        <div class="fp-box">${sha1Fingerprint(derBytes)}</div></div>`;
+    grid.appendChild(fpCard);
+
+    certResult.style.display = 'block';
+  }
+
+  function asn1DateToDate(node) {
+    let s = node.value;
+    if (node.type === forge.asn1.Type.UTCTIME) {
+      const yy = parseInt(s.substring(0,2), 10);
+      const year = yy >= 50 ? 1900 + yy : 2000 + yy;
+      return new Date(Date.UTC(year, parseInt(s.substring(2,4),10)-1, parseInt(s.substring(4,6),10),
+        parseInt(s.substring(6,8),10), parseInt(s.substring(8,10),10), parseInt(s.substring(10,12),10)));
+    } else {
+      return new Date(Date.UTC(parseInt(s.substring(0,4),10), parseInt(s.substring(4,6),10)-1,
+        parseInt(s.substring(6,8),10), parseInt(s.substring(8,10),10),
+        parseInt(s.substring(10,12),10), parseInt(s.substring(12,14),10)));
+    }
+  }
+
   // ── CRL parser (ASN.1 direct) ─────────────────────────────
   function parseCRL(raw) {
     try {
@@ -965,20 +1250,24 @@
       return;
     }
 
-    let cert, derBytes;
+    let cert, derBytes, asn1;
     try {
       derBytes = normalizeInput(raw);
-      const asn1 = forge.asn1.fromDer(derBytes);
-      // Try CRL if certificateFromAsn1 fails (DER CRL)
+      asn1 = forge.asn1.fromDer(derBytes);
       try {
         cert = forge.pki.certificateFromAsn1(asn1);
       } catch(certErr) {
-        // Might be a DER-encoded CRL
+        // Try EC/non-RSA certificate fallback first (ASN.1 direct parse)
+        try {
+          parseCertFromAsn1(asn1, derBytes);
+          return;
+        } catch(ecErr) {}
+        // Then try CRL
         try {
           parseCRLFromAsn1(asn1, derBytes);
           return;
         } catch(crlErr) {
-          throw certErr; // rethrow original cert error
+          throw certErr;
         }
       }
     } catch(e) {
