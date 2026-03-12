@@ -467,10 +467,12 @@
   • DER (HEX)  — 3082 04a5 3082 ...
   • Base64 DER — MIIEpTCCAo2gAwIB ...
   • PEM         — -----BEGIN CERTIFICATE----- ...
-  • Private Key — -----BEGIN PRIVATE KEY----- ..."></textarea>
+  • Private Key — -----BEGIN PRIVATE KEY----- ...
+  • 📁 파일을 이 영역에 드래그 앤 드롭할 수도 있습니다."></textarea>
 
       <div class="format-hint">
         💡 Wireshark 캡처에서 복사한 HEX, openssl 출력 Base64, .pem 파일, Private Key (PKCS#8 / PKCS#1) 모두 지원합니다.
+        파일(.pem .crt .cer .der .key)을 입력창에 끌어 놓으면 자동으로 읽습니다.
       </div>
 
       <div id="keyPassRow" style="display:none; margin-top:12px;">
@@ -644,6 +646,71 @@
     const val = this.value.trim();
     document.getElementById('keyPassRow').style.display = detectEncryptedKey(val) ? 'block' : 'none';
   });
+
+  // ── Drag & Drop file support ──────────────────────────────
+  (function() {
+    const ta = document.getElementById('certInput');
+    const allowedExts = ['.pem', '.crt', '.cer', '.der', '.key', '.p12', '.pfx'];
+
+    function isAllowedFile(name) {
+      const lower = name.toLowerCase();
+      return allowedExts.some(ext => lower.endsWith(ext));
+    }
+
+    ta.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      ta.style.borderColor = 'var(--accent)';
+      ta.style.boxShadow = '0 0 20px rgba(0,255,204,0.3)';
+    });
+
+    ta.addEventListener('dragleave', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      ta.style.borderColor = 'var(--border)';
+      ta.style.boxShadow = 'none';
+    });
+
+    ta.addEventListener('drop', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      ta.style.borderColor = 'var(--border)';
+      ta.style.boxShadow = 'none';
+
+      const files = e.dataTransfer.files;
+      if (!files || files.length === 0) return;
+
+      const file = files[0];
+      if (!isAllowedFile(file.name)) {
+        showError('지원하지 않는 파일 형식입니다. (.pem .crt .cer .der .key 파일을 사용하세요)');
+        return;
+      }
+
+      const reader = new FileReader();
+      const lower = file.name.toLowerCase();
+
+      if (lower.endsWith('.der') || lower.endsWith('.p12') || lower.endsWith('.pfx')) {
+        // Binary file → read as hex
+        reader.onload = function(ev) {
+          const arr = new Uint8Array(ev.target.result);
+          let hex = '';
+          arr.forEach(b => { hex += b.toString(16).padStart(2, '0'); });
+          ta.value = hex;
+          ta.dispatchEvent(new Event('input'));
+          parseCert();
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        // Text file (PEM, key, etc.)
+        reader.onload = function(ev) {
+          ta.value = ev.target.result;
+          ta.dispatchEvent(new Event('input'));
+          parseCert();
+        };
+        reader.readAsText(file);
+      }
+    });
+  })();
 
   function parsePrivateKey(raw) {
     let privateKey;
