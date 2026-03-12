@@ -1192,9 +1192,10 @@
         const parts = ipRaw.split('/');
         ipRaw = parts[0].trim();
         const extracted = parseInt(parts[1].trim(), 10);
-        if (!isNaN(extracted) && extracted >= 0 && extracted <= 32) {
-          document.getElementById('cidrInput').value = extracted;
+        if (isNaN(extracted) || extracted < 0 || extracted > 32) {
+          throw new Error('Invalid CIDR prefix (0-32)');
         }
+        document.getElementById('cidrInput').value = extracted;
         document.getElementById('ipInput').value = ipRaw;
       }
       ip = parseIPv4(ipRaw);
