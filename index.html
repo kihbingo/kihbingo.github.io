@@ -1186,7 +1186,18 @@
 
     let ip, prefix;
     try {
-      ip = parseIPv4(document.getElementById('ipInput').value);
+      let ipRaw = document.getElementById('ipInput').value.trim();
+      // Extract CIDR prefix from IP input if present (e.g. "192.168.1.1/24")
+      if (ipRaw.includes('/')) {
+        const parts = ipRaw.split('/');
+        ipRaw = parts[0].trim();
+        const extracted = parseInt(parts[1].trim(), 10);
+        if (!isNaN(extracted) && extracted >= 0 && extracted <= 32) {
+          document.getElementById('cidrInput').value = extracted;
+        }
+        document.getElementById('ipInput').value = ipRaw;
+      }
+      ip = parseIPv4(ipRaw);
       prefix = parseInt(document.getElementById('cidrInput').value, 10);
       if (isNaN(prefix) || prefix < 0 || prefix > 32) throw new Error('Invalid CIDR prefix (0-32)');
     } catch(e) {
