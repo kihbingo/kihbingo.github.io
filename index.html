@@ -736,7 +736,7 @@
     // version (optional, INTEGER)
     let version = '1 (v1)';
     if (tbs[idx].type === forge.asn1.Type.INTEGER) {
-      const v = forge.asn1.derToInteger(tbs[idx]);
+      const v = tbs[idx].value.charCodeAt(0);
       version = v === 1 ? '2 (v2)' : (v + 1) + '';
       idx++;
     }
