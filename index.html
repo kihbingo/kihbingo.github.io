@@ -485,7 +485,10 @@
       </div>
 
       <div class="btn-row">
+        <input type="file" id="certFileInput" accept=".pem,.crt,.cer,.der,.key,.crl,.p12,.pfx" style="display:none"
+          onchange="handleFileLoad(this)" />
         <button class="btn" onclick="parseCert()">▶ PARSE</button>
+        <button class="btn secondary" onclick="document.getElementById('certFileInput').click()">파일 로드</button>
         <button class="btn secondary" onclick="loadExample()">예제 로드</button>
         <button class="btn secondary" onclick="clearAll()">CLEAR</button>
       </div>
@@ -712,6 +715,42 @@
       }
     });
   })();
+
+  // ── File load button handler (reuses drag-drop logic) ──
+  function handleFileLoad(input) {
+    if (!input.files || input.files.length === 0) return;
+    const file = input.files[0];
+    const ta = document.getElementById('certInput');
+
+    if (!isAllowedFile(file.name)) {
+      showError('지원하지 않는 파일 형식입니다. (.pem .crt .cer .der .key .crl 파일을 사용하세요)');
+      input.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    const lower = file.name.toLowerCase();
+
+    if (lower.endsWith('.der') || lower.endsWith('.p12') || lower.endsWith('.pfx') || lower.endsWith('.crl')) {
+      reader.onload = function(ev) {
+        const arr = new Uint8Array(ev.target.result);
+        let hex = '';
+        arr.forEach(b => { hex += b.toString(16).padStart(2, '0'); });
+        ta.value = hex;
+        ta.dispatchEvent(new Event('input'));
+        parseCert();
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.onload = function(ev) {
+        ta.value = ev.target.result;
+        ta.dispatchEvent(new Event('input'));
+        parseCert();
+      };
+      reader.readAsText(file);
+    }
+    input.value = '';  // reset so same file can be loaded again
+  }
 
   // ── EC/non-RSA certificate fallback parser (ASN.1 direct) ──
   // Known EC curve OIDs
